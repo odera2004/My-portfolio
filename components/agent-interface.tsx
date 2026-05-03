@@ -3,189 +3,197 @@
 import { useEffect, useRef, useState } from "react"
 import { GitPullRequest, GitMerge, MessageSquare, CheckCircle2, Clock, AlertCircle, Zap, GitCommit, Eye, Terminal } from "lucide-react"
 
-// ── 1. Strict Type Definitions ──────────────────────────────────────────────
+// ── 1. STRUCT TYPES (This prevents your build error) ─────────────────────────
 
-type ReviewLineItem = 
-  | { type: "code"; text: string; author?: string }
-  | { type: "comment" | "approve" | "change"; text: string; author?: string }
-  | { type: "prop"; key: string; val: string }; // Strictly define prop shape
+type CodeLine = { type: "code"; text: string };
+type StatusLine = { type: "comment" | "approve" | "change"; text: string; author: string };
+type PropLine = { type: "prop"; key: string; val: string };
 
-// ── 2. Data ──────────────────────────────────────────────────────────────────
+type ReviewLineItem = CodeLine | StatusLine | PropLine;
+
+// ── 2. DATA ──────────────────────────────────────────────────────────────────
 
 const ALL_PRS = [
-  { id: 145, title: "feat: multi-agent orchestration v2", agent: "orchestrator", status: "review", comments: 2, additions: 57, deletions: 4, branch: "feat/orchestration-v2", time: "Just now" },
-  { id: 144, title: "fix: memory context window overflow", agent: "analyst-agent", status: "review", comments: 1, additions: 18, deletions: 3, branch: "fix/ctx-overflow", time: "1m ago" },
-  { id: 143, title: "feat: streaming tool response", agent: "monitor-agent", status: "merged", comments: 4, additions: 93, deletions: 11, branch: "feat/stream-tools", time: "1m ago" },
-  { id: 142, title: "feat: add memory context to executor", agent: "executor-agent", status: "merged", comments: 3, additions: 84, deletions: 12, branch: "feat/memory-ctx", time: "2m ago" },
-]
-
-const ALL_REVIEW_FILES = [
-  { file: "agent/executor.ts", pct: 72 },
-  { file: "lib/tools/index.ts", pct: 45 },
-  { file: "core/planner.ts", pct: 88 },
-  { file: "utils/retry.ts", pct: 31 },
-]
+  { id: 145, title: "feat: multi-agent orchestration v2", agent: "orchestrator", status: "review", branch: "feat/orch-v2" },
+  { id: 144, title: "fix: memory context window overflow", agent: "analyst-agent", status: "review", branch: "fix/ctx" },
+  { id: 143, title: "feat: streaming tool response", agent: "monitor-agent", status: "merged", branch: "feat/stream" },
+];
 
 const ALL_REVIEW_LINES: ReviewLineItem[] = [
   { type: "code",    text: 'const ctx = await memory.load(task.id)' },
-  { type: "prop",    key: "scope", val: "global" },
-  { type: "comment", text: "Should we cache this per agent run?", author: "analyst-agent" },
+  { type: "prop",    key: "scope", val: '"global"' },
+  { type: "comment", text: "Should we cache this?", author: "analyst-agent" },
   { type: "code",    text: 'return researcher.execute(task, ctx)' },
-  { type: "approve", text: "LGTM — memory scope looks correct", author: "monitor-agent" },
-  { type: "prop",    key: "retries", val: "3" },
-  { type: "code",    text: 'export const run = async (task) => {' },
-  { type: "change",  text: "Consider adding retry logic here", author: "executor-agent" },
   { type: "prop",    key: "timeout", val: "120s" },
-  { type: "code",    text: 'return { status: "done", result }' },
-  { type: "approve", text: "All checks pass", author: "analyst-agent" },
-]
+  { type: "approve", text: "LGTM — scope looks correct", author: "monitor-agent" },
+];
 
-const COMMITS = [
-  { hash: "a3f8c21", msg: "fix: memory leak in long-running agents", time: "Just now" },
-  { hash: "b7d2e09", msg: "feat: streaming response for analyst", time: "4m ago" },
-  { hash: "c9a1f34", msg: "chore: bump @agentic/sdk to 2.4.1", time: "12m ago" },
-]
+// ── 3. COMPONENTS ────────────────────────────────────────────────────────────
 
-// ── 3. Helper Components ─────────────────────────────────────────────────────
-
-function Bar({ pct, color = "rgba(0,0,0,0.75)" }: { pct: number; color?: string }) {
-  const [w, setW] = useState(0)
-  useEffect(() => { const t = setTimeout(() => setW(pct), 600); return () => clearTimeout(t) }, [pct])
-  return (
-    <div style={{ height: 2, background: "rgba(0,0,0,0.07)", borderRadius: 99, width: "100%", overflow: "hidden" }}>
-      <div style={{ height: "100%", width: `${w}%`, background: color, borderRadius: 99, transition: "width 1.4s cubic-bezier(0.16,1,0.3,1)" }} />
-    </div>
-  )
+function MiniBarGraph() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d")!;
+    let frame = 0;
+    const draw = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (let i = 0; i < 15; i++) {
+        const h = 5 + Math.abs(Math.sin(frame * 0.05 + i)) * 15;
+        ctx.fillStyle = "rgba(0,0,0,0.2)";
+        ctx.fillRect(i * 6, 25 - h, 4, h);
+      }
+      frame++;
+      requestAnimationFrame(draw);
+    };
+    draw();
+  }, []);
+  return <canvas ref={canvasRef} width={100} height={25} style={{ width: 100, height: 25 }} />;
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const cfg = {
-    merged:   { bg: "rgba(130,80,255,0.1)",  color: "#8250df", icon: <GitMerge size={9} />,  label: "Merged"   },
-    approved: { bg: "rgba(40,167,69,0.1)",   color: "#28a745", icon: <CheckCircle2 size={9} />, label: "Approved" },
-    review:   { bg: "rgba(201,169,110,0.12)",color: "#b07d30", icon: <Eye size={9} />,       label: "In Review"},
-  }[status] ?? { bg: "#eee", color: "#666", icon: null, label: status }
-
-  return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 8, padding: "2px 7px", borderRadius: 99, background: cfg.bg, color: cfg.color, fontFamily: "monospace", fontWeight: 600 }}>
-      {cfg.icon}{cfg.label}
-    </span>
-  )
-}
-
-// ── 4. The Critical Component (Fixed for TS) ─────────────────────────────────
-
-function ReviewLine({ item, delay }: { item: ReviewLineItem; delay: number }) {
-  const [visible, setVisible] = useState(false)
-  useEffect(() => { 
-    const t = setTimeout(() => setVisible(true), delay)
-    return () => clearTimeout(t) 
-  }, [delay])
-
-  if (!visible) return null
-
-  // Block 1: Handle Properties (The Error Fix)
+/**
+ * FIXED REVIEW LINE COMPONENT
+ * Uses explicit type checking to satisfy the Next.js Build Worker.
+ */
+function ReviewLine({ item }: { item: ReviewLineItem }) {
+  // Narrow to Property Line
   if (item.type === "prop") {
     return (
-      <div style={{ padding: "2px 10px", display: "flex", gap: 4, fontFamily: "monospace", fontSize: 9 }}>
-        <span style={{ color: "#2563eb" }}>{item.key}</span>
-        <span style={{ color: "#111" }}>: </span>
-        <span style={{ color: "#16a34a" }}>{item.val}</span>
-        <span style={{ color: "#111" }}>,</span>
+      <div className="flex gap-1 py-0.5 font-mono text-[10px]">
+        <span className="text-blue-600">{item.key}</span>
+        <span className="text-gray-400">:</span>
+        <span className="text-green-600">{item.val}</span>
+        <span className="text-gray-400">,</span>
       </div>
-    )
+    );
   }
 
-  // Block 2: Handle Code
+  // Narrow to Code Line
   if (item.type === "code") {
     return (
-      <div style={{ padding: "3px 10px", background: "rgba(0,0,0,0.04)", borderLeft: "2px solid rgba(0,0,0,0.08)", margin: "2px 0" }}>
-        <code style={{ fontSize: 9, fontFamily: "monospace", color: "rgba(0,0,0,0.55)" }}>{item.text}</code>
+      <div className="my-0.5 border-l-2 border-gray-100 bg-gray-50/50 px-2 py-1">
+        <code className="font-mono text-[10px] text-gray-500">{item.text}</code>
       </div>
-    )
+    );
   }
 
-  // Block 3: Handle Status/Comments
-  const iconCfg = {
-    approve: { icon: <CheckCircle2 size={9} color="#28a745" />, color: "#28a745" },
-    change:  { icon: <AlertCircle  size={9} color="#b07d30" />, color: "#b07d30" },
-    comment: { icon: <MessageSquare size={9} color="rgba(0,0,0,0.35)" />, color: "rgba(0,0,0,0.5)" },
-  }[item.type]
-
+  // Narrow to Status/Comment Line
+  const color = item.type === "approve" ? "text-green-600" : item.type === "change" ? "text-amber-600" : "text-gray-400";
   return (
-    <div style={{ display: "flex", gap: 6, alignItems: "flex-start", padding: "4px 0" }}>
-      {iconCfg.icon}
-      <div>
-        <span style={{ fontSize: 9, color: iconCfg.color, fontFamily: "monospace" }}>{item.text}</span>
-        {item.author && <span style={{ fontSize: 8, color: "rgba(0,0,0,0.3)", marginLeft: 5, fontFamily: "monospace" }}>— {item.author}</span>}
+    <div className="flex items-start gap-2 py-1">
+      <MessageSquare size={10} className="mt-0.5 text-gray-300" />
+      <div className="flex flex-col">
+        <span className={`font-mono text-[10px] leading-tight ${color}`}>{item.text}</span>
+        <span className="text-[8px] text-gray-300">— {item.author}</span>
       </div>
     </div>
-  )
+  );
 }
 
-// ── 5. Main Component ────────────────────────────────────────────────────────
+// ── 4. MAIN INTERFACE ────────────────────────────────────────────────────────
 
-export function AgentInterface() {
-  const [mounted, setMounted] = useState(false)
-  const [prOffset, setPrOffset] = useState(0)
-  const [reviewFileIdx, setReviewFileIdx] = useState(0)
-  const [reviewLineIdx, setReviewLineIdx] = useState(0)
+export default function AgentInterface() {
+  const [mounted, setMounted] = useState(false);
+  const [lineIdx, setLineIdx] = useState(0);
 
-  useEffect(() => { 
-    setMounted(true)
-    const i1 = setInterval(() => setPrOffset(o => (o + 1) % 2), 4000)
-    const i2 = setInterval(() => setReviewFileIdx(i => (i + 1) % 4), 3000)
-    const i3 = setInterval(() => setReviewLineIdx(i => (i >= ALL_REVIEW_LINES.length ? 0 : i + 1)), 800)
-    return () => { clearInterval(i1); clearInterval(i2); clearInterval(i3); }
-  }, [])
+  useEffect(() => {
+    setMounted(true);
+    const timer = setInterval(() => {
+      setLineIdx(prev => (prev >= ALL_REVIEW_LINES.length ? 1 : prev + 1));
+    }, 1500);
+    return () => clearInterval(timer);
+  }, []);
 
-  if (!mounted) return null
+  if (!mounted) return null;
 
   return (
-    <div style={{ padding: 20, background: "#f9f9f9", minHeight: "100vh", display: "flex", justifyContent: "center" }}>
-      <div style={{ width: "100%", maxWidth: 800, background: "#fff", border: "1px solid #ddd", borderRadius: 12, overflow: "hidden", boxShadow: "0 10px 30px rgba(0,0,0,0.05)" }}>
+    <div className="flex min-h-screen items-center justify-center bg-[#fdfdfd] p-4 text-slate-900">
+      <div className="w-full max-w-4xl overflow-hidden rounded-2xl border border-black/5 bg-white shadow-[0_20px_50px_rgba(0,0,0,0.1)]">
         
-        {/* Header */}
-        <div style={{ padding: "12px 16px", background: "#fcfcfc", borderBottom: "1px solid #eee", display: "flex", gap: 6 }}>
-          <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#ff5f56" }} />
-          <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#ffbd2e" }} />
-          <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#27c93f" }} />
+        {/* Header Strip */}
+        <div className="flex items-center justify-between border-bottom border-black/5 bg-gray-50/50 px-4 py-3">
+          <div className="flex gap-1.5">
+            <div className="h-2.5 w-2.5 rounded-full bg-[#ff5f56]" />
+            <div className="h-2.5 w-2.5 rounded-full bg-[#ffbd2e]" />
+            <div className="h-2.5 w-2.5 rounded-full bg-[#27c93f]" />
+          </div>
+          <div className="font-mono text-[10px] tracking-widest text-gray-400">AGENTIC_CORE // PR_MONITOR</div>
+          <div className="flex items-center gap-2">
+            <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-green-500" />
+            <span className="font-mono text-[9px] text-green-600">LIVE_SYNC</span>
+          </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1 }}>
-          
-          {/* PR Section */}
-          <div style={{ padding: 16, borderRight: "1px solid #eee" }}>
-            <h3 style={{ fontSize: 10, color: "#999", marginBottom: 12, letterSpacing: "0.1em" }}>ACTIVE PULL REQUESTS</h3>
-            {ALL_PRS.slice(prOffset, prOffset + 3).map(pr => (
-              <div key={pr.id} style={{ padding: 10, border: "1px solid #eee", borderRadius: 8, marginBottom: 8 }}>
-                <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>{pr.title}</div>
-                <StatusBadge status={pr.status} />
+        {/* Top Metrics */}
+        <div className="grid grid-cols-4 border-b border-black/5">
+          {[
+            { label: "Merged", val: "12", icon: <GitMerge size={12}/> },
+            { label: "Commits", val: "148", icon: <GitCommit size={12}/> },
+            { label: "Review Time", val: "2m", icon: <Clock size={12}/> },
+            { label: "Efficiency", val: "98%", icon: <Zap size={12}/> },
+          ].map((m, i) => (
+            <div key={i} className="flex flex-col border-r border-black/5 p-4 last:border-r-0">
+              <div className="flex items-center gap-2 text-gray-400">
+                {m.icon}
+                <span className="font-mono text-[8px] uppercase tracking-wider">{m.label}</span>
               </div>
-            ))}
-          </div>
+              <div className="mt-1 flex items-end justify-between">
+                <span className="font-mono text-xl font-bold">{m.val}</span>
+                <MiniBarGraph />
+              </div>
+            </div>
+          ))}
+        </div>
 
-          {/* Review Section */}
-          <div style={{ padding: 16 }}>
-            <h3 style={{ fontSize: 10, color: "#999", marginBottom: 12, letterSpacing: "0.1em" }}>AGENT CODE REVIEW</h3>
-            <div style={{ marginBottom: 12 }}>
-              {ALL_REVIEW_FILES.map((f, i) => (
-                <div key={f.file} style={{ marginBottom: 8, opacity: i === reviewFileIdx ? 1 : 0.3 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, fontFamily: "monospace", marginBottom: 2 }}>
-                    <span>{f.file}</span><span>{f.pct}%</span>
+        {/* Main Content Area */}
+        <div className="grid grid-cols-12 gap-px bg-black/5">
+          
+          {/* PR List */}
+          <div className="col-span-5 bg-white p-4">
+            <div className="mb-4 flex items-center gap-2 text-gray-400">
+              <GitPullRequest size={12} />
+              <span className="font-mono text-[9px] font-bold uppercase tracking-widest">Active Pull Requests</span>
+            </div>
+            <div className="space-y-2">
+              {ALL_PRS.map(pr => (
+                <div key={pr.id} className="group rounded-lg border border-black/5 p-3 transition-colors hover:bg-gray-50">
+                  <div className="flex items-start justify-between">
+                    <span className="font-sans text-[11px] font-semibold text-gray-800">{pr.title}</span>
+                    <span className={`rounded-full px-2 py-0.5 font-mono text-[8px] font-bold uppercase ${pr.status === 'merged' ? 'bg-purple-50 text-purple-600' : 'bg-amber-50 text-amber-600'}`}>
+                      {pr.status}
+                    </span>
                   </div>
-                  <Bar pct={f.pct} color={i === reviewFileIdx ? "#2563eb" : "#ccc"} />
+                  <div className="mt-2 flex items-center gap-2 font-mono text-[9px] text-gray-400">
+                    <span>{pr.branch}</span>
+                    <span>•</span>
+                    <span>{pr.agent}</span>
+                  </div>
                 </div>
               ))}
             </div>
-            <div style={{ borderTop: "1px solid #eee", paddingTop: 12 }}>
-              {ALL_REVIEW_LINES.slice(0, reviewLineIdx).slice(-4).map((line, idx) => (
-                <ReviewLine key={idx} item={line} delay={0} />
+          </div>
+
+          {/* Live Review Feed */}
+          <div className="col-span-7 bg-white p-4">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-gray-400">
+                <Terminal size={12} />
+                <span className="font-mono text-[9px] font-bold uppercase tracking-widest">Live Agent Review</span>
+              </div>
+              <span className="font-mono text-[9px] text-blue-500">ID: #145_EXEC</span>
+            </div>
+            
+            <div className="rounded-xl border border-black/5 bg-gray-50/30 p-4 min-h-[220px]">
+              {ALL_REVIEW_LINES.slice(0, lineIdx).map((item, i) => (
+                <ReviewLine key={i} item={item} />
               ))}
+              <div className="mt-2 h-3 w-1.5 animate-pulse bg-gray-300" />
             </div>
           </div>
 
         </div>
       </div>
     </div>
-  )
+  );
 }
