@@ -2,7 +2,34 @@
 
 import { useState, useEffect } from "react"
 
-const STEPS = [
+// --- Define Strict Types for Build Safety ---
+interface BaseLine { type: string; text?: string }
+interface GapLine { type: "gap" }
+interface CommentLine { type: "comment" | "output" | "success" | "url" | "command" | "plain"; text: string }
+interface PropLine { type: "prop"; key: string; val: string }
+interface KeywordLine { 
+  type: "keyword"; 
+  text: string; 
+  after?: string; 
+  keyword2?: string; 
+  keyword3?: string; 
+  string?: string; 
+  fn?: string; 
+  args?: string 
+}
+
+type StepLine = GapLine | CommentLine | PropLine | KeywordLine;
+
+interface Step {
+  num: string;
+  title: string;
+  desc: string;
+  file: string;
+  lang: string;
+  code: StepLine[];
+}
+
+const STEPS: Step[] = [
   {
     num: "01",
     title: "Environment",
@@ -76,19 +103,23 @@ const STEPS = [
   },
 ]
 
-function CodeLine({ line }: { line: (typeof STEPS)[0]["code"][0] }) {
+function CodeLine({ line }: { line: StepLine }) {
   if (line.type === "gap") return <div className="h-3" />
+  
+  // These types all share the 'text' property
   if (line.type === "comment") return <div className="text-[#9ca3af]">{line.text}</div>
   if (line.type === "output") return <div className="text-[#6b7280]">{line.text}</div>
   if (line.type === "success") return <div className="text-[#16a34a]">{line.text}</div>
   if (line.type === "url") return <div className="text-[#2563eb] underline">{line.text}</div>
+  if (line.type === "plain") return <div className="text-[#111]">{line.text}</div>
   if (line.type === "command") return (
     <div>
       <span className="text-[#16a34a]">$ </span>
       <span className="text-[#111]">{line.text}</span>
     </div>
   )
-  if (line.type === "plain") return <div className="text-[#111]">{line.text}</div>
+
+  // This block handles the "prop" type specifically
   if (line.type === "prop") return (
     <div>
       <span className="text-[#2563eb]">{line.key}</span>
@@ -97,6 +128,8 @@ function CodeLine({ line }: { line: (typeof STEPS)[0]["code"][0] }) {
       <span className="text-[#111]">,</span>
     </div>
   )
+
+  // This block handles the "keyword" type specifically
   if (line.type === "keyword") return (
     <div>
       <span className="text-[#7c3aed]">{line.text}</span>
@@ -108,6 +141,7 @@ function CodeLine({ line }: { line: (typeof STEPS)[0]["code"][0] }) {
       {line.string && <span className="text-[#16a34a]">{line.string}</span>}
     </div>
   )
+  
   return null
 }
 
@@ -150,7 +184,6 @@ export function DevExSection() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
-          {/* Left Buttons */}
           <div className="flex flex-col gap-3">
             {STEPS.map((s, i) => (
               <button
@@ -187,7 +220,6 @@ export function DevExSection() {
             ))}
           </div>
 
-          {/* Right Code Panel */}
           <div
             className="lg:col-span-2 rounded-3xl border border-black/[0.06] p-2 flex flex-col relative overflow-hidden"
             style={{
@@ -208,7 +240,7 @@ export function DevExSection() {
                   {step.file}
                 </div>
                 <div className="flex gap-1.5">
-                  {[0, 1, 2, 3].map(d => (
+                  {STEPS.map((_, d) => (
                     <div
                       key={d}
                       className="w-1.5 h-1.5 rounded-full transition-all duration-500"
