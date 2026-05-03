@@ -2,6 +2,7 @@
 
 import { useRef, useEffect } from "react"
 import { Canvas, useThree, useLoader, useFrame } from "@react-three/fiber"
+// @ts-ignore
 import * as THREE from "three"
 
 // Vertex shader — passes UV coordinates
