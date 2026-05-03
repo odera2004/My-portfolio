@@ -93,7 +93,7 @@ function ReviewLine({ item }: { item: ReviewLineItem }) {
 
 // ── 4. MAIN INTERFACE ────────────────────────────────────────────────────────
 
-export default function AgentInterface() {
+export function AgentInterface() {
   const [mounted, setMounted] = useState(false);
   const [lineIdx, setLineIdx] = useState(0);
 
